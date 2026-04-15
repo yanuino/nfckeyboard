@@ -1,57 +1,38 @@
-# Project Documentation
+# nfckeyboard
 
-Welcome to the project documentation.
+nfckeyboard reads supported NFC tags and types the extracted Imagotag serial as keyboard input.
 
-This documentation is built using **MkDocs** and is intended to provide:
+## Overview
 
-- an overview of the project
-- usage and configuration guidance
-- API reference documentation (when applicable)
+- Watches for NFC cards using PC/SC readers
+- Parses NDEF payloads to extract `nfc.imagotag.com/<serial>` values
+- Types the serial and presses Enter automatically
+- Runs in system tray by default
 
----
+## Usage
 
-## Getting started
+Install dependencies:
 
-This project uses an opinionated Python setup with:
+```bash
+uv sync
+```
 
-- `uv` for dependency management
-- `Ruff` for linting and formatting
-- `pytest` for testing
+Run in system tray mode (default):
 
-Refer to the repository **README** for development setup instructions.
+```bash
+uv run -m nfckeyboard
+```
 
----
+Run in interactive mode:
 
-## Documentation structure
+```bash
+uv run -m nfckeyboard --interactive
+```
 
-Documentation sources are located in the `docs/` directory.
+## Build
 
-Typical sections include:
+Build docs locally:
 
-- project overview
-- user guides
-- API reference
-- development notes
-
-Additional pages can be added by creating Markdown files under `docs/` and
-registering them in `mkdocs.yml`.
-
----
-
-## API reference
-
-If enabled, API documentation is generated automatically from source code
-docstrings using **mkdocstrings**.
-
----
-
-## Versioning and releases
-
-Documentation is built in **strict mode**, meaning warnings are treated as errors.
-
-During releases:
-
-- documentation is always built
-- publication is optional and handled via CI
-
-Refer to the release documentation for details.
+```bash
+uv run mkdocs build --strict
+```
