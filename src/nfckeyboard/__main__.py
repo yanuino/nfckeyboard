@@ -423,9 +423,10 @@ def load_tray_image() -> Image.Image:
     Returns:
         Pillow image loaded from ``icons/icon_16.png`` or a black fallback image.
     """
-    if getattr(sys, "_MEIPASS", None):
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
         # Running in PyInstaller bundle
-        icon_path = Path(sys._MEIPASS) / "icons" / "icon_16.png"
+        icon_path = Path(meipass) / "icons" / "icon_16.png"
     else:
         # Running in development
         icon_path = Path(__file__).resolve().parents[2] / "icons" / "icon_16.png"
