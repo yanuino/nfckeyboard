@@ -3,12 +3,16 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "python-template"
+name = "nfckeyboard"
 version = "0.1.0"
-description = "Add your description here"
+description = "Read NFC tags and send keystrokes to the computer."
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "pynput>=1.8.1",
+    "pyscard>=2.3.1",
+    "pystray>=0.19.5",
+]
 
 # Uncomment if you want: uv run project
 # [project.scripts]
@@ -28,14 +32,14 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/project"]
+packages = ["src/nfckeyboard"]
 
 [tool.uv]
 package = true
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 exclude = [
     ".venv",
     "venv",
