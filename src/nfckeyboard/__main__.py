@@ -1,8 +1,13 @@
+import argparse
 import re
-import time
+import sys
+import threading
+from pathlib import Path
 from typing import Any
 
+from PIL import Image
 from pynput.keyboard import Controller, Key
+from pystray import Icon, Menu, MenuItem as TrayMenuItem
 from smartcard.CardConnection import CardConnection
 from smartcard.CardMonitoring import CardMonitor, CardObserver
 from smartcard.Exceptions import CardConnectionException, NoCardException
@@ -273,13 +278,17 @@ def send_serial_with_keyboard(serial: str, keyboard: Controller) -> None:
 class ImgotagObserver(CardObserver):
     """Card observer that extracts and emits Imagotag serials from NFC tags."""
 
-    def __init__(self) -> None:
+    def __init__(self, verbose: bool = True) -> None:
         """Initialize the observer resources.
+
+        Args:
+            verbose: Whether to print card events and errors to console.
 
         Returns:
             None.
         """
         self.keyboard = Controller()
+        self.verbose = verbose
 
     def update(self, observable: Any, handlers: tuple[list[Any], list[Any]]) -> None:
         """Handle card monitor notifications.
@@ -294,10 +303,12 @@ class ImgotagObserver(CardObserver):
         added_cards, removed_cards = handlers
 
         for card in removed_cards:
-            print(f"Card removed: {card}")
+            if self.verbose:
+                print(f"Card removed: {card}")
 
         for card in added_cards:
-            print(f"Card detected: {card}")
+            if self.verbose:
+                print(f"Card detected: {card}")
             self._process_card(card)
 
     def _process_card(self, card: Any) -> None:
@@ -334,19 +345,24 @@ class ImgotagObserver(CardObserver):
 
             serial = extract_imgotag_serial(text_value)
             if serial is None:
-                print("Invalid NDEF format")
+                if self.verbose:
+                    print("Invalid NDEF format")
                 return
 
-            print(f"Serial: {serial}")
+            if self.verbose:
+                print(f"Serial: {serial}")
             try:
                 send_serial_with_keyboard(serial, self.keyboard)
             except Exception as exc:
-                print(f"Keyboard send error: {exc}")
+                if self.verbose:
+                    print(f"Keyboard send error: {exc}")
 
         except (NoCardException, CardConnectionException) as exc:
-            print(f"Card communication error: {exc}")
+            if self.verbose:
+                print(f"Card communication error: {exc}")
         except Exception as exc:
-            print(f"Unexpected card processing error: {exc}")
+            if self.verbose:
+                print(f"Unexpected card processing error: {exc}")
         finally:
             try:
                 connection.disconnect()
@@ -354,30 +370,167 @@ class ImgotagObserver(CardObserver):
                 pass
 
 
-def main():
-    """Start NFC monitoring and attach the Imagotag observer.
+class NfcMonitorService:
+    """Run NFC monitoring in a stoppable loop."""
+
+    def __init__(self, verbose: bool = True) -> None:
+        """Initialize monitor and observer state.
+
+        Args:
+            verbose: Whether to print card events and errors to console.
+
+        Returns:
+            None.
+        """
+        self.monitor = CardMonitor()
+        self.observer = ImgotagObserver(verbose=verbose)
+        self.stop_event = threading.Event()
+
+    def run(self) -> None:
+        """Start monitoring and block until stop is requested."""
+        self.monitor.addObserver(self.observer)
+        try:
+            while not self.stop_event.is_set():
+                self.stop_event.wait(1)
+        finally:
+            try:
+                self.monitor.deleteObserver(self.observer)
+            except Exception:
+                pass
+
+    def stop(self) -> None:
+        """Request stop of the monitoring loop."""
+        self.stop_event.set()
+
+
+def create_black_tray_image(size: int = 64) -> Image.Image:
+    """Create a plain black image for use as the tray icon.
+
+    Args:
+        size: Width and height of the square icon in pixels.
+
+    Returns:
+        Black RGB Pillow image.
+    """
+    return Image.new("RGB", (size, size), "black")
+
+
+def load_tray_image() -> Image.Image:
+    """Load tray icon from the repository icons directory.
+
+    Supports both development and PyInstaller bundled modes.
+
+    Returns:
+        Pillow image loaded from ``icons/icon_16.png`` or a black fallback image.
+    """
+    if getattr(sys, "_MEIPASS", None):
+        # Running in PyInstaller bundle
+        icon_path = Path(sys._MEIPASS) / "icons" / "icon_16.png"
+    else:
+        # Running in development
+        icon_path = Path(__file__).resolve().parents[2] / "icons" / "icon_16.png"
+
+    try:
+        return Image.open(icon_path)
+    except Exception as exc:
+        print(f"Failed to load tray icon from {icon_path}: {exc}")
+        return create_black_tray_image()
+
+
+def hide_console_on_windows() -> None:
+    """Hide the console window on Windows when running in systray mode.
+
+    Returns:
+        None.
+    """
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+    except Exception:
+        pass
+
+
+def run_interactive() -> None:
+    """Run NFC monitoring in interactive console mode.
 
     Returns:
         None.
     """
     print("Monitoring for MIFARE Ultralight/NTAG (Ctrl+C to stop)...")
 
-    monitor = CardMonitor()
-    observer = ImgotagObserver()
+    service = NfcMonitorService(verbose=True)
 
     try:
-        monitor.addObserver(observer)
-        while True:
-            time.sleep(1)
+        service.run()
     except KeyboardInterrupt:
         print("Stopping monitor...")
+        service.stop()
     except Exception as exc:
         print(f"Fatal monitoring error: {exc}")
+
+
+def run_systray() -> None:
+    """Run NFC monitoring and host controls in the system tray.
+
+    Returns:
+        None.
+    """
+    hide_console_on_windows()
+
+    service = NfcMonitorService(verbose=False)
+    worker = threading.Thread(target=service.run, name="nfc-monitor", daemon=True)
+    worker.start()
+
+    def on_quit(icon: Any, _item: object) -> None:
+        service.stop()
+        icon.stop()
+
+    tray_icon = Icon(
+        "nfckeyboard",
+        load_tray_image(),
+        "nfckeyboard",
+        menu=Menu(TrayMenuItem("Quit", on_quit)),
+    )
+
+    try:
+        tray_icon.run()
     finally:
-        try:
-            monitor.deleteObserver(observer)
-        except Exception:
-            pass
+        service.stop()
+        worker.join(timeout=2)
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Returns:
+        Parsed arguments namespace.
+    """
+    parser = argparse.ArgumentParser(
+        prog="nfckeyboard",
+        description="Read NFC tags and type Imagotag serials.",
+    )
+    parser.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="Run in interactive console mode instead of system tray mode.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Start the application in interactive or system tray mode.
+
+    Returns:
+        None.
+    """
+    args = parse_args()
+    if args.interactive:
+        run_interactive()
+        return
+
+    run_systray()
 
 
 if __name__ == "__main__":
